@@ -23,7 +23,7 @@ A robust Go-based service that monitors a directory for SQL files and executes t
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/sql-processor.git
+git clone https://github.com/semelyanov86/sql-processor.git
 cd sql-processor
 ```
 
@@ -107,7 +107,6 @@ All operations are logged to stdout with timestamps:
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details
-```
 
 ## Contributing
 
@@ -116,97 +115,3 @@ MIT License - See [LICENSE](LICENSE) for details
 3. Commit your changes (`git commit -am 'Add some AmazingFeature'`)
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
-
-## Support
-
-For issues and feature requests, please [open an issue](https://github.com/yourusername/sql-processor/issues).
-</think>
-
-```markdown
-# SQL File Processor
-
-A Go-based service that monitors a directory for SQL files, executes them against a MySQL database, and sends email notifications.
-
-## Features
-
-- Real-time file monitoring
-- Email notifications (success/error)
-- Configurable via YAML
-- Secure credential handling
-- Automatic file management
-
-## Prerequisites
-
-- Go 1.21+
-- MySQL 5.7+
-- SMTP server access
-
-## Installation
-
-1. Clone repo:
-```bash
-git clone https://github.com/yourusername/sql-processor.git
-cd sql-processor
-```
-
-2. Install dependencies:
-```bash
-go get github.com/fsnotify/fsnotify gopkg.in/yaml.v3 github.com/go-sql-driver/mysql
-```
-
-3. Build:
-```bash
-go build -o sql-processor
-```
-
-## Configuration
-
-Create `config.yml`:
-```yaml
-database:
-  host: localhost
-  port: 3306
-  user: db_user
-  password: db_pass
-  name: db_name
-
-smtp:
-  server: smtp.example.com
-  port: 587
-  username: smtp_user
-  password: smtp_pass
-  from: alerts@example.com
-  to: admin@example.com
-
-paths:
-  input: ./sql/input
-  output: ./sql/processed
-  error: ./sql/errors
-```
-
-## Usage
-
-```bash
-./sql-processor
-```
-
-Directory structure:
-```
-sql/
-├── input      # New SQL files
-├── processed  # Successful executions
-└── errors     # Failed executions
-```
-
-## Security
-
-- Set strict permissions:
-```bash
-chmod 600 config.yml
-```
-
-- Use environment variables for production
-
-## License
-
-MIT - See [LICENSE](LICENSE)
