@@ -1,0 +1,19 @@
+database:
+  host: localhost
+  port: 3306
+  user: root
+  password: secret
+  name: mydb
+
+smtp:
+  server: smtp.example.com
+  port: 587
+  username: user@example.com
+  password: smtp-password
+  from: noreply@example.com
+  to: admin@example.com
+
+paths:
+  input: ./sql/input
+  output: ./sql/processed
+  error: ./sql/errors
