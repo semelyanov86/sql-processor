@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
-	"github.com/octoper/go-ray"
 	_ "github.com/octoper/go-ray"
 	"log"
 	"net/smtp"
@@ -127,7 +126,7 @@ func executeSQL(query string) error {
 	if strings.Contains(query, "\ufeff") {
 		query = strings.ReplaceAll(query, "\ufeff", "")
 	}
-	ray.Ray(query)
+
 	_, err := db.Exec(query)
 	return err
 }
