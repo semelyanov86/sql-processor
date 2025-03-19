@@ -1,14 +1,18 @@
 package main
 
 import (
+	"crypto/tls"
 	"database/sql"
 	"fmt"
+	"github.com/octoper/go-ray"
+	_ "github.com/octoper/go-ray"
 	"log"
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
-	"github.com/fsnotify/fsnotify"
 	_ "github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
 )
@@ -33,8 +37,8 @@ type Config struct {
 
 	Paths struct {
 		Input  string `yaml:"input"`
-		Output string `yaml:"output"`
-		Error  string `yaml:"error"`
+		Done   string `yaml:"done"`
+		Failed string `yaml:"failed"`
 	} `yaml:"paths"`
 }
 
@@ -44,60 +48,31 @@ var (
 )
 
 func main() {
-	// Load configuration
-	loadConfig()
+	loadConfig("config.yml")
 
-	// Initialize database connection
 	initDB()
 	defer db.Close()
 
-	// Create watcher
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer watcher.Close()
-
-	// Add path to watcher
-	err = watcher.Add(config.Paths.Input)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Main loop
 	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			if event.Op&fsnotify.Create == fsnotify.Create {
-				processFile(event.Name)
-			}
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Println("Watcher error:", err)
-		}
+		processFiles()
+		time.Sleep(5 * time.Second) // Проверка каждые 5 секунд
 	}
 }
 
-func loadConfig() {
-	configFile, err := os.ReadFile("config.yml")
+func loadConfig(filename string) {
+	data, err := os.ReadFile(filename)
 	if err != nil {
-		log.Fatal("Error reading config file:", err)
+		log.Fatalf("Error reading config file: %v", err)
 	}
 
-	err = yaml.Unmarshal(configFile, &config)
+	err = yaml.Unmarshal(data, &config)
 	if err != nil {
-		log.Fatal("Error parsing config file:", err)
+		log.Fatalf("Error parsing config file: %v", err)
 	}
 }
 
 func initDB() {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&multiStatements=true",
 		config.Database.User,
 		config.Database.Password,
 		config.Database.Host,
@@ -107,74 +82,129 @@ func initDB() {
 	var err error
 	db, err = sql.Open("mysql", dsn)
 	if err != nil {
-		log.Fatal("Database connection error:", err)
+		log.Fatalf("Error connecting to database: %v", err)
 	}
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatal("Database ping error:", err)
+		log.Fatalf("Error pinging database: %v", err)
+	}
+}
+
+func processFiles() {
+	files, err := os.ReadDir(config.Paths.Input)
+	if err != nil {
+		log.Printf("Error reading input directory: %v", err)
+		return
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		filePath := filepath.Join(config.Paths.Input, file.Name())
+		processFile(filePath)
 	}
 }
 
 func processFile(filePath string) {
-	// Read SQL file
-	sqlContent, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		handleError(filePath, err)
+		log.Printf("Error reading file %s: %v", filePath, err)
 		return
 	}
 
-	// Execute SQL
-	_, err = db.Exec(string(sqlContent))
+	err = executeSQL(string(data))
 	if err != nil {
 		handleError(filePath, err)
-		return
+	} else {
+		handleSuccess(filePath)
 	}
+}
 
-	// Move file to output
-	newPath := filepath.Join(config.Paths.Output, filepath.Base(filePath))
-	err = os.Rename(filePath, newPath)
-	if err != nil {
-		log.Println("Error moving file:", err)
+func executeSQL(query string) error {
+	if strings.Contains(query, "\ufeff") {
+		query = strings.ReplaceAll(query, "\ufeff", "")
 	}
-
-	// Send success email
-	sendEmail("SQL Script Success",
-		fmt.Sprintf("Script %s executed successfully", filepath.Base(filePath)))
+	ray.Ray(query)
+	_, err := db.Exec(query)
+	return err
 }
 
 func handleError(filePath string, err error) {
-	log.Println("Error:", err)
+	log.Printf("Error executing SQL: %v", err)
+	sendEmail("SQL Execution Error", fmt.Sprintf("Error: %v\nFile: %s", err, filePath))
+	moveFile(filePath, config.Paths.Failed)
+}
 
-	// Move file to error directory
-	newPath := filepath.Join(config.Paths.Error, filepath.Base(filePath))
-	os.Rename(filePath, newPath)
+func handleSuccess(filePath string) {
+	log.Println("SQL executed successfully")
+	sendEmail("SQL Execution Success", fmt.Sprintf("File: %s", filePath))
+	moveFile(filePath, config.Paths.Done)
+}
 
-	// Send error email
-	sendEmail("SQL Script Error",
-		fmt.Sprintf("Error executing script %s: %v", filepath.Base(filePath), err))
+func moveFile(source, destDir string) {
+	fileName := filepath.Base(source)
+	destPath := filepath.Join(destDir, fileName)
+
+	err := os.Rename(source, destPath)
+	if err != nil {
+		log.Printf("Error moving file: %v", err)
+	}
 }
 
 func sendEmail(subject, body string) {
-	auth := smtp.PlainAuth("",
-		config.SMTP.Username,
-		config.SMTP.Password,
-		config.SMTP.Server)
+	tlsConfig := &tls.Config{
+		ServerName:         config.SMTP.Server,
+		InsecureSkipVerify: false,
+	}
 
-	msg := []byte(fmt.Sprintf("To: %s\r\n"+
-		"Subject: %s\r\n"+
-		"\r\n"+
-		"%s\r\n", config.SMTP.To, subject, body))
+	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", config.SMTP.Server, config.SMTP.Port), tlsConfig)
+	if err != nil {
+		log.Printf("Error creating TLS connection: %v", err)
+		return
+	}
+	defer conn.Close()
 
-	err := smtp.SendMail(
-		fmt.Sprintf("%s:%d", config.SMTP.Server, config.SMTP.Port),
-		auth,
+	client, err := smtp.NewClient(conn, config.SMTP.Server)
+	if err != nil {
+		log.Printf("Error creating SMTP client: %v", err)
+		return
+	}
+	defer client.Close()
+
+	auth := smtp.PlainAuth("", config.SMTP.Username, config.SMTP.Password, config.SMTP.Server)
+	if err := client.Auth(auth); err != nil {
+		log.Printf("SMTP auth error: %v", err)
+		return
+	}
+
+	if err := client.Mail(config.SMTP.From); err != nil {
+		log.Printf("Mail command error: %v", err)
+		return
+	}
+	if err := client.Rcpt(config.SMTP.To); err != nil {
+		log.Printf("Rcpt command error: %v", err)
+		return
+	}
+
+	wc, err := client.Data()
+	if err != nil {
+		log.Printf("Data command error: %v", err)
+		return
+	}
+	defer wc.Close()
+
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s",
 		config.SMTP.From,
-		[]string{config.SMTP.To},
-		msg,
+		config.SMTP.To,
+		subject,
+		body,
 	)
 
-	if err != nil {
-		log.Println("Email send error:", err)
+	if _, err = fmt.Fprint(wc, msg); err != nil {
+		log.Printf("Error writing message: %v", err)
+		return
 	}
 }
