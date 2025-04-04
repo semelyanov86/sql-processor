@@ -114,6 +114,11 @@ func processFile(filePath string) {
 		return
 	}
 
+	if !strings.Contains(string(data), "-- &SQL DONE& --") {
+		log.Printf("File %s is incomplete (missing '-- &SQL DONE& --'). Skipping execution.", filePath)
+		return
+	}
+
 	err = executeSQL(string(data))
 	if err != nil {
 		handleError(filePath, err)
